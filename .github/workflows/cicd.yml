@@ -1,0 +1,95 @@
+name: cicd
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+      - prod
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Databricks bundle target for manual validation/deployment.
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    outputs:
+      target: ${{ steps.target.outputs.target }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Java for PySpark tests
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install local package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint reusable Python code
+        run: ruff check src data_generator tests
+
+      - name: Compile notebooks and scripts
+        run: python -m compileall -q src data_generator tests notebooks
+
+      - name: Unit tests
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          PYTHONPATH: "src:."
+          PYSPARK_PYTHON: "python"
+          PYSPARK_DRIVER_PYTHON: "python"
+        run: pytest -q
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Resolve bundle target
+        id: target
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "target=${{ inputs.target }}" >> "${GITHUB_OUTPUT}"
+          elif [ "${GITHUB_REF_NAME}" = "main" ] || [ "${GITHUB_REF_NAME}" = "prod" ]; then
+            echo "target=prod" >> "${GITHUB_OUTPUT}"
+          else
+            echo "target=dev" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Validate Databricks bundle
+        if: ${{ env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != '' }}
+        run: databricks bundle validate --target "${{ steps.target.outputs.target }}"
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Deploy Databricks bundle
+        run: databricks bundle deploy --target "${{ needs.validate.outputs.target }}"
