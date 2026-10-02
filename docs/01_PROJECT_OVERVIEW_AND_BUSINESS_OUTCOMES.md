@@ -1,5 +1,5 @@
 # Uber Eats Marketplace Lakehouse: Project Overview And Business Outcomes
-
+# Overview   
 ## 1. Executive Summary
 
 This project builds a production-minded data platform for an Uber Eats-style food delivery marketplace on Databricks Free Edition. The platform ingests operational marketplace files, processes them through a bronze-silver-gold lakehouse architecture, enforces data quality, preserves master-data history with SCD Type 2 dimensions, and publishes curated facts, aggregates, and Genie-ready views for business analytics.
