@@ -1,0 +1,36 @@
+bundle:
+  name: uber-eats-marketplace-lakehouse
+
+variables:
+  catalog:
+    description: Unity Catalog catalog used by the lakehouse.
+    default: ue_marketplace_lakehouse_dev
+
+include:
+  - resources/*.yml
+
+sync:
+  include:
+    - config/**
+    - data_generator/**
+    - notebooks/**
+    - scripts/**
+    - sql/**
+    - src/**
+    - tests/**
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      root_path: ~/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: ue_marketplace_lakehouse_dev
+
+  prod:
+    mode: production
+    workspace:
+      root_path: ~/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: ue_marketplace_lakehouse_prod

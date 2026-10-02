@@ -1,0 +1,13 @@
+.databricks/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+generated_data/
+htmlcov/
+.coverage
+

@@ -1,0 +1,41 @@
+project:
+  name: uber_eats_marketplace_lakehouse
+  catalog: ue_marketplace_lakehouse_dev
+  owner_group: account users
+  timezone: UTC
+
+schemas:
+  bronze: bronze
+  silver: silver
+  gold: gold
+  dq: dq
+  audit: audit
+  config: config
+
+volumes:
+  landing: landing_volume
+  checkpoints: checkpoint_volume
+  schemas: schema_volume
+  artifacts: artifact_volume
+
+data_generation:
+  default_days: 45
+  default_orders_per_day: 1200
+  default_seed: 20260819
+  default_start_date: "2026-06-01"
+
+quality:
+  critical_rules:
+    - orders_required_keys
+    - orders_unique_event_id
+    - orders_valid_time_sequence
+    - payments_required_keys
+    - payments_non_negative_amount
+    - payments_valid_currency
+    - order_items_positive_quantity
+    - orders_known_merchant
+
+optimization:
+  enable_predictive_optimization: true
+  enable_liquid_clustering: true
+  enable_uniform: true
