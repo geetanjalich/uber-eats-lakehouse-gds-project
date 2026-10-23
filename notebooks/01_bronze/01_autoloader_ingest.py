@@ -126,3 +126,13 @@ ORDER BY table_name
 """
     )
 )
+
+display(
+    spark.sql(
+        f"""
+SELECT *
+FROM {catalog}.gold.fact_order where order_date like '%-03'
+"""
+    )    
+    
+)
