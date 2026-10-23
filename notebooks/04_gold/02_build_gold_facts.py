@@ -79,15 +79,16 @@ def changed_window(df, source_name: str):
     if full_refresh:
         return df, None
     last = get_saved_watermark(source_name)
-    upper = df.agg(F.max("gold_updated_at")).first()[0]
+    upper = df.agg(F.max("_ingest_ts")).first()[0]
     if upper is None:
         return df.limit(0), None
 
-    changed = df.filter(F.col("gold_updated_at") <= F.lit(upper))
+    changed = df.filter(F.col("_ingest_ts") <= F.lit(upper))
     if last is not None:
-        changed = changed.filter(F.col("gold_updated_at") > F.lit(last))
+        changed = changed.filter(F.col("_ingest_ts") > F.lit(last))
     return changed, upper
-
+  
+# COMMAND ----------
 
 silver_orders = spark.table(f"{catalog}.silver.orders")
 silver_payments = spark.table(f"{catalog}.silver.payments")
