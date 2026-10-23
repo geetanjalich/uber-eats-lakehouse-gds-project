@@ -33,16 +33,16 @@ from uber_eats_lakehouse.gold_transforms import build_fact_order
 # COMMAND ----------
 WATERMARK_TABLE = f"{catalog}.audit.pipeline_watermarks"
 
-spark.sql(
-    f"""
-CREATE TABLE IF NOT EXISTS {WATERMARK_TABLE} (
-  pipeline_name STRING,
-  target_table TIMESTAMP,
-  last_processed_ts TIMESTAMP,
-  updated_at TIMESTAMP default current_timestamp()
-) USING DELTA
-"""
-)
+# spark.sql(
+#     f"""
+# CREATE TABLE IF NOT EXISTS {WATERMARK_TABLE} (
+#   pipeline_name STRING,
+#   target_table TIMESTAMP,
+#   last_processed_ts TIMESTAMP,
+#   updated_at TIMESTAMP default current_timestamp()
+# ) USING DELTA
+# """
+# )
 
 def get_saved_watermark(source_name: str):
     row = (
