@@ -7,9 +7,14 @@
 
 import sys
 from pathlib import Path
+from pyspark.sql import functions as F
+
 
 dbutils.widgets.text("catalog", "ue_marketplace_lakehouse_dev", "Unity Catalog catalog")
 catalog = dbutils.widgets.get("catalog")
+dbutils.widgets.dropdown("full_refresh", "false", ["false", "true"], "Ignore watermarks")
+catalog = dbutils.widgets.get("catalog")
+full_refresh = dbutils.widgets.get("full_refresh") == "true"
 
 # Resolve the uploaded project root so the notebook imports the tested gold transform
 # from the bundle deployment rather than depending on a manually attached library.
@@ -25,14 +30,106 @@ for candidate in [str(project_root), str(project_root / "src"), str(Path.cwd()),
 from uber_eats_lakehouse.gold_transforms import build_fact_order
 
 # COMMAND ----------
+WATERMARK_TABLE = f"{catalog}.audit.pipeline_watermarks"
+
+spark.sql(
+    f"""
+CREATE TABLE IF NOT EXISTS {WATERMARK_TABLE} (
+  pipeline_name STRING,
+  target_table TIMESTAMP,
+  last_processed_ts TIMESTAMP,
+  updated_at TIMESTAMP default current_timestamp()
+) USING DELTA
+"""
+)
+
+def get_saved_watermark(source_name: str):
+    row = (
+        spark.table(WATERMARK_TABLE)
+        .filter(F.col("source_name") == source_name)
+        .select("watermark")
+        .first()
+    )
+    return row[0] if row else None
+
+def save_watermark(source_name: str, watermark) -> None:
+    if watermark is None:
+        return
+    (
+        spark.createDataFrame([(source_name, watermark)], "source_name string, watermark timestamp")
+        .withColumn("updated_at", F.current_timestamp())
+        .createOrReplaceTempView("v_watermark_update")
+    )
+    spark.sql(
+        f"""
+MERGE INTO {WATERMARK_TABLE} t
+USING v_watermark_update s
+ON t.source_name = s.source_name
+WHEN MATCHED THEN UPDATE SET *
+WHEN NOT MATCHED THEN INSERT *
+"""
+    )
+
+def changed_window(df, source_name: str):
+    """Rows in (saved watermark, upper bound]. Returns (changed_df, new_watermark).
+
+    The upper bound is pinned once at the start, so rows that land in silver while
+    this job runs are not skipped when the watermark is saved.
+    """
+    if full_refresh:
+        return df, None
+    last = get_saved_watermark(source_name)
+    upper = df.agg(F.max("_ingest_ts")).first()[0]
+    if upper is None:
+        return df.limit(0), None
+
+    changed = df.filter(F.col("_ingest_ts") <= F.lit(upper))
+    if last is not None:
+        changed = changed.filter(F.col("_ingest_ts") > F.lit(last))
+    return changed, upper
+
+
+silver_orders = spark.table(f"{catalog}.silver.orders")
+silver_payments = spark.table(f"{catalog}.silver.payments")
+
+orders_changed, orders_wm = changed_window(silver_orders, "fact_order.orders")
+payments_changed, payments_wm = changed_window(silver_payments, "fact_order.payments")
+
+
+changed_orders = (
+    orders_changed.select("order_id")
+    .union(payments_changed.select("order_id"))
+    .where("order_id IS NOT NULL")
+    .distinct()
+    .cache()
+)
+
+
+    
+# COMMAND ----------
+
+# 3. Full silver rows for the affected orders only (left semi join = filter, no row multiplication)
+
+orders_delta = silver_orders.join(changed_orders, "order_id", "left_semi")
+payments_delta = silver_payments.join(changed_orders, "order_id", "left_semi")
+
+# 4. Rebuild fact rows for just those orders.
+# Dimensions are read in full: they are small relative to silver facts.
 
 build_fact_order(
-    spark.table(f"{catalog}.silver.orders"),
-    spark.table(f"{catalog}.silver.payments"),
+    orders_delta,
+    payments_delta,
     spark.table(f"{catalog}.gold.dim_customer"),
     spark.table(f"{catalog}.gold.dim_merchant"),
     spark.table(f"{catalog}.gold.dim_courier"),
 ).createOrReplaceTempView("v_fact_order")
+
+if changed_orders.isEmpty():
+    print("[skip] fact_order: no changes in silver")
+    save_watermark("fact_order.orders", orders_wm)
+    save_watermark("fact_order.payments", payments_wm)
+    changed_orders.unpersist()
+    dbutils.notebook.exit("no changes")
 
 # The primary order fact is rebuilt from trusted silver and current SCD2 dimensions on
 # each workflow run. Upstream silver merges keep this input incremental and consistent.
