@@ -52,6 +52,7 @@ def read_bronze_increment():
     """Bronze rows newer than the silver watermark. All rows if no watermark."""
     df = spark.table(f"{catalog}.bronze.orders_raw")
     watermark = get_watermark(f"{catalog}.silver.orders")
+    print("watermark for silver.orders:", watermark)
     if watermark is None:
         return df
     return df.filter(F.col("_ingest_ts") > F.lit(watermark))
@@ -79,6 +80,18 @@ WHEN NOT MATCHED THEN INSERT *
     )
 
 # COMMAND ----------
+
+increment = read_bronze_increment()
+print(f"bronze.orders increment row count: {increment.count()}")
+cleaned = clean_orders(increment)
+print(f"silver.orders cleaned row count: {cleaned.count()}")
+
+if cleaned.isEmpty():
+    print("[skip] silver.orders: no new rows")
+else:
+    cleaned.createOrReplaceTempView("v_orders_clean")
+    merge_view_into_table("v_orders_clean", f"{catalog}.silver.orders", ["event_id"])
+    print("[ok]   silver.orders merged")
 
 # clean_orders(spark.table(f"{catalog}.bronze.orders_raw")).createOrReplaceTempView("v_orders_clean")
 # merge_view_into_table("v_orders_clean", f"{catalog}.silver.orders", ["event_id"])
