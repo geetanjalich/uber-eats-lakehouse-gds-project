@@ -7,6 +7,8 @@
 
 import sys
 from pathlib import Path
+from pyspark.sql import functions as F
+
 
 dbutils.widgets.text("catalog", "ue_marketplace_lakehouse_dev", "Unity Catalog catalog")
 catalog = dbutils.widgets.get("catalog")
@@ -39,6 +41,20 @@ def table_exists(table_name: str) -> bool:
     except Exception:
         return False
 
+def get_watermark(target_table: str):
+    """Max _ingest_ts already in silver, or None on first run / empty table."""
+    if not table_exists(target_table):
+        return None
+    return spark.table(target_table).agg(F.max("_ingest_ts")).first()[0]
+
+
+def read_bronze_increment():
+    """Bronze rows newer than the silver watermark. All rows if no watermark."""
+    df = spark.table(f"{catalog}.bronze.orders_raw")
+    watermark = get_watermark(f"{catalog}.silver.orders")
+    if watermark is None:
+        return df
+    return df.filter(F.col("_ingest_ts") > F.lit(watermark))
 
 def merge_view_into_table(view_name: str, target_table: str, key_columns: list[str]) -> None:
     """Create a Delta target if needed, then merge rows from a temp view."""
@@ -64,8 +80,8 @@ WHEN NOT MATCHED THEN INSERT *
 
 # COMMAND ----------
 
-clean_orders(spark.table(f"{catalog}.bronze.orders_raw")).createOrReplaceTempView("v_orders_clean")
-merge_view_into_table("v_orders_clean", f"{catalog}.silver.orders", ["event_id"])
+# clean_orders(spark.table(f"{catalog}.bronze.orders_raw")).createOrReplaceTempView("v_orders_clean")
+# merge_view_into_table("v_orders_clean", f"{catalog}.silver.orders", ["event_id"])
 
 # COMMAND ----------
 
@@ -175,3 +191,4 @@ merge_view_into_table(
 # COMMAND ----------
 
 display(spark.sql(f"SHOW TABLES IN {catalog}.silver"))
+

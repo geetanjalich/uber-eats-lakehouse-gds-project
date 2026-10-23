@@ -31,6 +31,7 @@ resources:
             notebook_path: ../notebooks/02_silver/01_build_silver.py
             base_parameters:
               catalog: ${var.catalog}
+              full_refresh: ${var.full_refresh}
 
         - task_key: enforce_silver_dq
           depends_on:

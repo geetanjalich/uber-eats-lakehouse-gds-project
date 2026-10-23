@@ -5,6 +5,9 @@ variables:
   catalog:
     description: Unity Catalog catalog used by the lakehouse.
     default: ue_marketplace_lakehouse_dev
+  full_refresh:
+    description: Ignore watermarks and reprocess all data.
+    default: "false"
 
 include:
   - resources/*.yml
