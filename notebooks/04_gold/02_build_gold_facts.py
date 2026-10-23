@@ -27,7 +27,6 @@ for candidate in [str(project_root), str(project_root / "src"), str(Path.cwd()),
     if candidate not in sys.path:
         sys.path.append(candidate)
 
-from tests.conftest import spark
 from uber_eats_lakehouse.gold_transforms import build_fact_order
 
 # COMMAND ----------
