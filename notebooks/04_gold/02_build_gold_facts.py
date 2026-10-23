@@ -27,6 +27,7 @@ for candidate in [str(project_root), str(project_root / "src"), str(Path.cwd()),
     if candidate not in sys.path:
         sys.path.append(candidate)
 
+from tests.conftest import spark
 from uber_eats_lakehouse.gold_transforms import build_fact_order
 
 # COMMAND ----------
@@ -46,8 +47,8 @@ CREATE TABLE IF NOT EXISTS {WATERMARK_TABLE} (
 def get_saved_watermark(source_name: str):
     row = (
         spark.table(WATERMARK_TABLE)
-        .filter(F.col("source_name") == source_name)
-        .select("watermark")
+        .filter(F.col("target_table") == source_name)
+        .select("last_processed_ts")
         .first()
     )
     return row[0] if row else None
@@ -56,7 +57,7 @@ def save_watermark(source_name: str, watermark) -> None:
     if watermark is None:
         return
     (
-        spark.createDataFrame([(source_name, watermark)], "source_name string, watermark timestamp")
+        spark.createDataFrame([(None,source_name, watermark)], "pipeline_name string, target_table string,last_processed_ts timestamp")
         .withColumn("updated_at", F.current_timestamp())
         .createOrReplaceTempView("v_watermark_update")
     )
@@ -64,7 +65,7 @@ def save_watermark(source_name: str, watermark) -> None:
         f"""
 MERGE INTO {WATERMARK_TABLE} t
 USING v_watermark_update s
-ON t.source_name = s.source_name
+ON t.target_table = s.target_table
 WHEN MATCHED THEN UPDATE SET *
 WHEN NOT MATCHED THEN INSERT *
 """
@@ -79,21 +80,21 @@ def changed_window(df, source_name: str):
     if full_refresh:
         return df, None
     last = get_saved_watermark(source_name)
-    upper = df.agg(F.max("_ingest_ts")).first()[0]
+    upper = df.agg(F.max("gold_updated_at")).first()[0]
     if upper is None:
         return df.limit(0), None
 
-    changed = df.filter(F.col("_ingest_ts") <= F.lit(upper))
+    changed = df.filter(F.col("gold_updated_at") <= F.lit(upper))
     if last is not None:
-        changed = changed.filter(F.col("_ingest_ts") > F.lit(last))
+        changed = changed.filter(F.col("gold_updated_at") > F.lit(last))
     return changed, upper
 
 
 silver_orders = spark.table(f"{catalog}.silver.orders")
 silver_payments = spark.table(f"{catalog}.silver.payments")
 
-orders_changed, orders_wm = changed_window(silver_orders, "fact_order.orders")
-payments_changed, payments_wm = changed_window(silver_payments, "fact_order.payments")
+orders_changed, orders_wm = changed_window(silver_orders, f"{catalog}.fact_order.orders")
+payments_changed, payments_wm = changed_window(silver_payments, f"{catalog}.fact_order.payments")
 
 
 changed_orders = (
@@ -126,8 +127,8 @@ build_fact_order(
 
 if changed_orders.isEmpty():
     print("[skip] fact_order: no changes in silver")
-    save_watermark("fact_order.orders", orders_wm)
-    save_watermark("fact_order.payments", payments_wm)
+    save_watermark(f"{catalog}fact_order.orders", orders_wm)
+    save_watermark(f"{catalog}fact_order.payments", payments_wm)
     changed_orders.unpersist()
     dbutils.notebook.exit("no changes")
 
