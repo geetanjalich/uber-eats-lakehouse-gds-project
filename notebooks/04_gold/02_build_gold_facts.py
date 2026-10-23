@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from pyspark.sql import functions as F
 
-
 dbutils.widgets.text("catalog", "ue_marketplace_lakehouse_dev", "Unity Catalog catalog")
 catalog = dbutils.widgets.get("catalog")
 dbutils.widgets.dropdown("full_refresh", "false", ["false", "true"], "Ignore watermarks")
@@ -69,6 +68,7 @@ WHEN MATCHED THEN UPDATE SET *
 WHEN NOT MATCHED THEN INSERT *
 """
     )
+    display(spark.sql(f"select * from {WATERMARK_TABLE} where target_table = '{source_name}'"))
 
 def changed_window(df, source_name: str):
     """Rows in (saved watermark, upper bound]. Returns (changed_df, new_watermark).
